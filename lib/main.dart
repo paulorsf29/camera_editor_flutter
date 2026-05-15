@@ -2,11 +2,9 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_gallery_saver_plus/image_gallery_saver_plus.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 void main() {
@@ -25,22 +23,24 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const EdgeDetectorPage(),
+      home: const MainNavigationPage(),
     );
   }
 }
 
 enum ImageViewType { original, grayscale, edges }
 
-class EdgeDetectorPage extends StatefulWidget {
-  const EdgeDetectorPage({super.key});
+class MainNavigationPage extends StatefulWidget {
+  const MainNavigationPage({super.key});
 
   @override
-  State<EdgeDetectorPage> createState() => _EdgeDetectorPageState();
+  State<MainNavigationPage> createState() => _MainNavigationPageState();
 }
 
-class _EdgeDetectorPageState extends State<EdgeDetectorPage> {
+class _MainNavigationPageState extends State<MainNavigationPage> {
   final ImagePicker _picker = ImagePicker();
+
+  int _selectedIndex = 0;
 
   File? _originalFile;
   Uint8List? _originalBytes;
@@ -49,12 +49,9 @@ class _EdgeDetectorPageState extends State<EdgeDetectorPage> {
 
   ImageViewType _selectedView = ImageViewType.original;
 
-  double _threshold = 40;
   bool _isProcessing = false;
 
-  String _processingInfo = 'Nenhum processamento realizado.';
-  String _dateTimeInfo = '-';
-  String _locationInfo = '-';
+  static const int _fixedThreshold = 4;
 
   Future<void> _captureImage() async {
     try {
@@ -73,51 +70,14 @@ class _EdgeDetectorPageState extends State<EdgeDetectorPage> {
         _selectedView = ImageViewType.original;
       });
 
-      await _registerMetadata();
       await _processImage();
+
+      setState(() {
+        _selectedIndex = 1;
+      });
     } catch (e) {
       _showSnackBar('Erro ao capturar imagem: $e');
     }
-  }
-
-  Future<void> _registerMetadata() async {
-    final now = DateTime.now();
-    String locationText = 'Localização indisponível';
-
-    try {
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-
-      if (!serviceEnabled) {
-        locationText = 'GPS desativado';
-      } else {
-        LocationPermission permission = await Geolocator.checkPermission();
-
-        if (permission == LocationPermission.denied) {
-          permission = await Geolocator.requestPermission();
-        }
-
-        if (permission == LocationPermission.denied) {
-          locationText = 'Permissão de localização negada';
-        } else if (permission == LocationPermission.deniedForever) {
-          locationText = 'Permissão negada permanentemente';
-        } else {
-          final position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high,
-          );
-
-          locationText =
-              'Lat: ${position.latitude.toStringAsFixed(5)}, '
-              'Lon: ${position.longitude.toStringAsFixed(5)}';
-        }
-      }
-    } catch (_) {
-      locationText = 'Erro ao obter localização';
-    }
-
-    setState(() {
-      _dateTimeInfo = DateFormat('dd/MM/yyyy HH:mm:ss').format(now);
-      _locationInfo = locationText;
-    });
   }
 
   Future<void> _processImage() async {
@@ -135,7 +95,7 @@ class _EdgeDetectorPageState extends State<EdgeDetectorPage> {
       }
 
       final gray = img.grayscale(decoded);
-      final edges = _applyEdgeDetection(gray, _threshold.toInt());
+      final edges = _applyEdgeDetection(gray, _fixedThreshold);
 
       final grayBytes = Uint8List.fromList(img.encodeJpg(gray, quality: 95));
       final edgeBytes = Uint8List.fromList(img.encodeJpg(edges, quality: 95));
@@ -143,10 +103,6 @@ class _EdgeDetectorPageState extends State<EdgeDetectorPage> {
       setState(() {
         _grayscaleBytes = grayBytes;
         _edgeBytes = edgeBytes;
-        _processingInfo =
-            'Filtro aplicado: tons de cinza + detecção de bordas por diferença entre pixels vizinhos. '
-            'Threshold atual: ${_threshold.toInt()}. '
-            'Tamanho: ${decoded.width}x${decoded.height}px.';
       });
     } catch (e) {
       _showSnackBar('Erro ao processar imagem: $e');
@@ -240,6 +196,56 @@ class _EdgeDetectorPageState extends State<EdgeDetectorPage> {
     );
   }
 
+  Widget _buildCaptureScreen() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            height: 260,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.grey.shade400),
+            ),
+            child: const Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.camera_alt, size: 70, color: Colors.deepPurple),
+                SizedBox(height: 12),
+                Text(
+                  'Capture uma foto',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: _captureImage,
+            icon: const Icon(Icons.camera_alt),
+            label: const Text('Capturar Foto'),
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 14,
+              ),
+            ),
+          ),
+          if (_isProcessing) ...[
+            const SizedBox(height: 20),
+            const CircularProgressIndicator(),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildImageArea() {
     final bytes = _getCurrentDisplayedBytes();
 
@@ -254,7 +260,7 @@ class _EdgeDetectorPageState extends State<EdgeDetectorPage> {
         ),
         child: const Center(
           child: Text(
-            'Capture uma imagem para iniciar o processamento.',
+            'Nenhuma imagem disponível.',
             textAlign: TextAlign.center,
           ),
         ),
@@ -263,11 +269,14 @@ class _EdgeDetectorPageState extends State<EdgeDetectorPage> {
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
-      child: Image.memory(
-        bytes,
-        height: 280,
-        width: double.infinity,
-        fit: BoxFit.contain,
+      child: Container(
+        color: Colors.grey.shade300,
+        child: Image.memory(
+          bytes,
+          height: 280,
+          width: double.infinity,
+          fit: BoxFit.contain,
+        ),
       ),
     );
   }
@@ -300,117 +309,72 @@ class _EdgeDetectorPageState extends State<EdgeDetectorPage> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildResultScreen() {
     final hasImage = _originalBytes != null;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Detector de Bordas'),
-        centerTitle: true,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildImageArea(),
-            const SizedBox(height: 16),
-            if (hasImage) ...[
-              Center(
-                child: Text(
-                  _getViewLabel(),
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              const SizedBox(height: 12),
-              _buildSelector(),
-              const SizedBox(height: 20),
-            ],
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Ajuste do threshold',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    Slider(
-                      value: _threshold,
-                      min: 0,
-                      max: 255,
-                      divisions: 255,
-                      label: _threshold.toInt().toString(),
-                      onChanged: hasImage
-                          ? (value) async {
-                              setState(() {
-                                _threshold = value;
-                              });
-                              await _processImage();
-                            }
-                          : null,
-                    ),
-                    Text('Threshold atual: ${_threshold.toInt()}'),
-                  ],
-                ),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildImageArea(),
+          const SizedBox(height: 16),
+          if (hasImage) ...[
+            Center(
+              child: Text(
+                _getViewLabel(),
+                style: Theme.of(context).textTheme.titleMedium,
               ),
             ),
             const SizedBox(height: 12),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Informações do processamento',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(_processingInfo),
-                    const SizedBox(height: 8),
-                    Text('Data/Hora: $_dateTimeInfo'),
-                    const SizedBox(height: 4),
-                    Text('Localização: $_locationInfo'),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            if (_isProcessing)
-              const Center(child: CircularProgressIndicator()),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              alignment: WrapAlignment.center,
-              children: [
-                ElevatedButton.icon(
-                  onPressed: _captureImage,
-                  icon: const Icon(Icons.camera_alt),
-                  label: const Text('Capturar Foto'),
-                ),
-                ElevatedButton.icon(
-                  onPressed: hasImage ? _processImage : null,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Reprocessar'),
-                ),
-                ElevatedButton.icon(
-                  onPressed: hasImage ? _saveProcessedImage : null,
-                  icon: const Icon(Icons.save),
-                  label: const Text('Salvar Bordas'),
-                ),
-              ],
-            ),
+            _buildSelector(),
+            const SizedBox(height: 20),
           ],
-        ),
+          ElevatedButton.icon(
+            onPressed: hasImage ? _saveProcessedImage : null,
+            icon: const Icon(Icons.save),
+            label: const Text('Salvar Bordas'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = [
+      _buildCaptureScreen(),
+      _buildResultScreen(),
+    ];
+
+    final titles = [
+      'Captura',
+      'Resultado',
+    ];
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(titles[_selectedIndex]),
+        centerTitle: true,
+      ),
+      body: pages[_selectedIndex],
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _selectedIndex,
+        onTap: (index) {
+          setState(() {
+            _selectedIndex = index;
+          });
+        },
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.camera_alt),
+            label: 'Captura',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.image),
+            label: 'Resultado',
+          ),
+        ],
       ),
     );
   }
